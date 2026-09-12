@@ -24,5 +24,13 @@ var todos = new List<TodoGetDto>
 };
 
 app.MapGet("/api/todos",()=> Results.Ok(todos));
+
+app.MapGet("/api/todos/{id}", (int id) =>
+{
+    var todo = todos.FirstOrDefault(x => x.Id == id);
+
+    return todo;
+    
+});
     
 app.Run();
