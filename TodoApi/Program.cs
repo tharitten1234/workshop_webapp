@@ -1,14 +1,16 @@
+using Microsoft.EntityFrameworkCore;
+using TodoApi.Data;
 using TodoApi.Dtos;
+using TodoApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
-// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
+builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
@@ -18,67 +20,59 @@ app.UseHttpsRedirection();
 
 var todoGroup = app.MapGroup("/api/todos").WithTags("Todos");
 
-var todos = new List<TodoGetDto>
+todoGroup.MapGet("/", async (AppDbContext db) =>
 {
-    new(1, "Learn C#", true),
-    new(2, "Learn ASP.NET Core", false),
-    new(3, "Build a web API", false)
-};
+    var todos = await db.Todos
+        .Select(x => new TodoGetDto(x.Id, x.Title, x.IsCompleted))
+        .ToListAsync();
 
-todoGroup.MapGet("/", () => Results.Ok(todos));
-
-todoGroup.MapGet("/{id}", (int id) =>
-{
-    var todo = todos.FirstOrDefault(t => t.Id == id);
-
-    return todo;
-
+    return Results.Ok(todos);
 });
 
-todoGroup.MapPost("/", (TodoPostDto dto) =>
+todoGroup.MapGet("/{id}", async (int id, AppDbContext db) =>
 {
-    var nextId = todos.Count == 0 ? 1 : todos.Max(t => t.Id) + 1;
-    var todo = new TodoGetDto(nextId, dto.Title, false);
-    todos.Add(todo);
+    var todo = await db.Todos.FindAsync(id);
+    if (todo is null) return Results.NotFound();
 
-    return Results.Created($"/api/todos/{todo.Id}", todo);
+    return Results.Ok(new TodoGetDto(todo.Id, todo.Title, todo.IsCompleted));
 });
 
-todoGroup.MapPut("/{id}", (int id, TodoPutDto dto) =>
+todoGroup.MapPost("/", async (TodoPostDto dto, AppDbContext db) =>
 {
-    try
+    var todo = new TodoItem
     {
-        var index = todos.FindIndex(t => t.Id == id);
-        if (index == -1) return Results.NotFound();
+        Title = dto.Title,
+        IsCompleted = false,
+        CreatedAt = DateTime.UtcNow
+    };
 
-        todos[index] = todos[index] with
-        {
-            Title = dto.Title,
-            IsCompleted = dto.IsCompleted
-        };
+    db.Todos.Add(todo);
+    await db.SaveChangesAsync();
 
-        return Results.Ok(todos[index]);
-    }
-    catch (Exception ex)
-    {
-        return Results.Problem(ex.Message);
-    }
+    var result = new TodoGetDto(todo.Id, todo.Title, todo.IsCompleted);
+    return Results.Created($"/api/todos/{todo.Id}", result);
 });
 
-todoGroup.MapDelete("/{id}", (int id) =>
+todoGroup.MapPut("/{id}", async (int id, TodoPutDto dto, AppDbContext db) =>
 {
-    try
-    {
-        var todo = todos.FirstOrDefault(t => t.Id == id);
-        if (todo is null) return Results.NotFound();
+    var todo = await db.Todos.FindAsync(id);
+    if (todo is null) return Results.NotFound();
 
-        todos.Remove(todo);
-        return Results.NoContent();
-    }
-    catch (Exception ex)
-    {
-        return Results.Problem(ex.Message);
-    }
+    todo.Title = dto.Title;
+    todo.IsCompleted = dto.IsCompleted;
+    await db.SaveChangesAsync();
+
+    return Results.Ok(new TodoGetDto(todo.Id, todo.Title, todo.IsCompleted));
+});
+
+todoGroup.MapDelete("/{id}", async (int id, AppDbContext db) =>
+{
+    var todo = await db.Todos.FindAsync(id);
+    if (todo is null) return Results.NotFound();
+
+    db.Todos.Remove(todo);
+    await db.SaveChangesAsync();
+    return Results.NoContent();
 });
 
 app.Run();
